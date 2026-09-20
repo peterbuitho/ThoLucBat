@@ -111,11 +111,12 @@ How to read it:
 
 ### Tests
 
-`pytest` (35 tests, no GPU or server needed; the Gemma tokenizer test is skipped offline):
+`pytest` (70 tests, no GPU or server needed; the Gemma tokenizer test is skipped offline):
 - validator: every rule, near-rhymes, duplicate lines, odd line counts, syllable parsing, output cleaning;
 - sampler: run against a scripted fake model, covering rule-abiding line beats a more probable illegal one,
   fallback to fewest violations, extra rounds, repeated rhyme words, repetition penalty;
-- the prompt renderer used for line-by-line generation equals the tokenizer's chat template.
+- the prompt renderer used for line-by-line generation equals the tokenizer's chat template;
+- the home-only guard of the model switcher (below): which addresses and proxy headers are accepted.
 
 The tests were mutation-checked: deliberately breaking the tiếng-4 rule, the 6-vs-8 rule, or the sampler's
 selection makes them fail.
@@ -189,9 +190,9 @@ The eval loss was still falling slowly at the end of every run, with no sign of 
 ## Project layout
 
 ```
-app/          validator.py  prompts.py  agent.py (repair loop + line-by-line)  webui.py
+app/          validator.py  prompts.py  agent.py (repair loop + line-by-line)  webui.py  serving.py (model switcher)
 scripts/      prepare_dataset.py  make_test_prompts.py  train_sft.py  merge_adapter.py
-              serve.sh  evaluate.py
+              serve.sh  switch_model.sh  evaluate.py
 tests/        pytest suite
 data/         train.jsonl  validation.jsonl  test_prompts.jsonl  eval/
 runs/         one folder per training run (config, loss history, log)
@@ -227,9 +228,29 @@ bash scripts/serve.sh ~/vietpoet-models/sft-v1/merged
 .venv/bin/python scripts/evaluate.py --model vietpoet --tag sft-v1-lw16 --mode linewise --only-8
 .venv/bin/python -m pytest
 
-# 4. web UI (uses line-by-line sampling; needs the server running; not yet exercised end to end)
+# 4. web UI (uses line-by-line sampling; needs the server running)
 .venv/bin/python -m app.webui
 ```
+
+## Using the models at home
+
+`app/webui.py` is a small page for writing poems with the line-by-line sampler; it shows the rule scores and
+logs each poem and thumbs up/down (`data/generations.jsonl`, `data/feedback.jsonl`, git-ignored). It talks only
+to the local vLLM server; vLLM listens on 127.0.0.1, and telemetry is off (`VLLM_NO_USAGE_STATS`,
+`DO_NOT_TRACK`, Gradio analytics, `HF_HUB_OFFLINE` for local models).
+
+Switching between the 4B, 9B and Gemma 4 models (only one fits on the GPU at a time):
+
+```bash
+scripts/switch_model.sh list              # which models exist, which one is running
+scripts/switch_model.sh 9b                # stop the current one, load this one, wait until ready (~1 min)
+VIETPOET_ALLOW_SWITCH=1 VIETPOET_HOST=<lan-address> .venv/bin/python -m app.webui   # page with a model dropdown
+```
+
+The dropdown is **opt-in and for the home network only**: it does not exist unless `VIETPOET_ALLOW_SWITCH=1`,
+it accepts requests only from loopback / private (RFC 1918, link-local) addresses, it refuses anything carrying
+proxy headers (so it stays disabled behind a reverse proxy or tunnel), and it only ever acts on a vLLM
+server at 127.0.0.1. Leave the variable unset for anything reachable from the internet.
 
 ## Limits and next steps
 

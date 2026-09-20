@@ -33,12 +33,14 @@ class PoetAgent:
         target: float = 0.95,
         temperature: float = 0.9,
         repair_temperature: float = 0.6,
+        family: str | None = None,
     ):
         self.client = OpenAI(
             base_url=base_url or os.environ.get("VIETPOET_BASE_URL", "http://127.0.0.1:8000/v1"),
             api_key=os.environ.get("VIETPOET_API_KEY", "EMPTY"),
         )
         self.model = model or os.environ.get("VIETPOET_MODEL", "vietpoet")
+        self.family = family or os.environ.get("VIETPOET_FAMILY", "qwen")   # raw-prompt format: qwen | gemma
         self.n_candidates = n_candidates
         self.n_repairs = n_repairs
         self.max_rounds = max_rounds
@@ -110,7 +112,7 @@ class PoetAgent:
         If no candidate is clean after extra rounds, the one with the fewest violations is used.
         """
         request = make_request(topic, n_lines)
-        base = render_prompt(request)
+        base = render_prompt(request, self.family)
         lines: list[str] = []
         history: list[dict] = []
         for k in range(n_lines):

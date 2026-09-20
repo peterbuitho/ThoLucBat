@@ -8,6 +8,8 @@ shift || true   # remaining arguments are passed to vllm (e.g. --max-num-seqs 32
 # Flatpak sandbox: expose the host's libcuda if the loader can't find it.
 export LD_LIBRARY_PATH="/run/host/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 export VLLM_USE_FLASHINFER_SAMPLER=0  # no nvcc in sandbox; avoid JIT
+export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1   # no telemetry
+if [ -d "$MODEL" ]; then export HF_HUB_OFFLINE=1; fi   # local model: never contact the internet
 exec "$ROOT/.venv-server/bin/vllm" serve "$MODEL" \
   --served-model-name vietpoet \
   --host 127.0.0.1 --port 8000 \

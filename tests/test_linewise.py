@@ -16,6 +16,7 @@ class FakeAgent(PoetAgent):
     def __init__(self, script):
         self.script, self.calls, self.prompts = script, 0, []
         self.temperature = 0.9
+        self.family = "qwen"
 
     def _complete_lines(self, prompt, n, temperature):
         self.prompts.append(prompt)
