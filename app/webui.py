@@ -40,7 +40,8 @@ def make_poem(topic: str, n_lines: int):
         raise gr.Error("Hãy nhập chủ đề.")
     if serving.is_switching():
         raise gr.Error("Đang đổi mô hình, vui lòng đợi một chút rồi thử lại.")
-    _sync_family()
+    if _sync_family() is None:
+        raise gr.Error("Chưa có mô hình nào đang chạy." + (" Hãy mở mục Mô hình và chọn một mô hình." if ALLOW_SWITCH else ""))
     res = agent.create_poem_linewise(topic, int(n_lines))
     r = res.report
     rec = {"id": uuid.uuid4().hex[:12], "ts": time.time(), "topic": topic, "n_lines": int(n_lines),
@@ -84,26 +85,44 @@ def load_state():
     return (gr.update(value=key if key in serving.MODELS else None), _status(key)) if ALLOW_SWITCH else (None, "")
 
 
-def do_switch(key: str | None, request: gr.Request):
+def _check_home(request: gr.Request) -> None:
     client = request.client.host if request.client else ""
     if not ALLOW_SWITCH or not serving.is_home_request(client, dict(request.headers)):
-        raise gr.Error("Chỉ đổi được mô hình từ mạng nhà.")
+        raise gr.Error("Chỉ điều khiển được mô hình từ mạng nhà.")
+
+
+def do_switch(key: str | None, request: gr.Request):
+    _check_home(request)
     if key not in serving.available():
         raise gr.Error("Hãy chọn một mô hình.")
     label, minutes = serving.MODELS[key]["label"], serving.MODELS[key]["minutes"]
     busy = gr.update(interactive=False)
     wait = (f"⏳ **Đang đổi sang {label}.** Việc này mất khoảng {minutes} phút (dừng mô hình cũ, nạp mô hình mới vào GPU). "
             "Vui lòng đợi và đừng đóng trang; các nút sẽ bật lại khi xong.")
-    yield wait, busy, busy, busy
+    yield wait, busy, busy, busy, busy
     try:
         for done, msg in serving.switch(key):
-            yield f"{wait}\n\n`{msg}`", busy, busy, busy
+            yield f"{wait}\n\n`{msg}`", busy, busy, busy, busy
     except (ValueError, RuntimeError, TimeoutError) as e:
         on = gr.update(interactive=True)
-        yield f"❌ Không đổi được mô hình: {e}", on, on, on
+        yield f"❌ Không đổi được mô hình: {e}", on, on, on, on
         return
     on = gr.update(interactive=True)
-    yield _status(_sync_family()) + " ✅ Đã sẵn sàng.", on, on, gr.update(value=key, interactive=True)
+    yield _status(_sync_family()) + " ✅ Đã sẵn sàng.", on, on, on, gr.update(value=key, interactive=True)
+
+
+def do_stop(request: gr.Request):
+    _check_home(request)
+    busy, on = gr.update(interactive=False), gr.update(interactive=True)
+    wait = "⏳ **Đang tắt mô hình** và giải phóng GPU. Việc này mất vài giây đến nửa phút, vui lòng đợi."
+    yield wait, busy, busy, busy, busy
+    try:
+        for done, msg in serving.stop():
+            yield f"{wait}\n\n`{msg}`", busy, busy, busy, busy
+    except (RuntimeError, TimeoutError) as e:
+        yield f"❌ Không tắt được mô hình: {e}", on, on, on, on
+        return
+    yield "✅ Đã tắt mô hình, GPU đã được giải phóng. Chọn một mô hình để bật lại.", on, on, on, gr.update(value=None, interactive=True)
 
 
 with gr.Blocks(title="VietPoet", analytics_enabled=False) as demo:
@@ -127,9 +146,13 @@ with gr.Blocks(title="VietPoet", analytics_enabled=False) as demo:
     if ALLOW_SWITCH:
         with gr.Accordion("Mô hình (chỉ dùng trong mạng nhà)", open=False):
             model_dd = gr.Dropdown([(m["label"], k) for k, m in serving.available().items()], label="Mô hình", value=None)
-            switch_btn = gr.Button("Đổi mô hình")
+            with gr.Row():
+                switch_btn = gr.Button("Đổi mô hình")
+                stop_btn = gr.Button("Tắt mô hình")
             model_status = gr.Markdown()
-        switch_btn.click(do_switch, model_dd, [model_status, go, switch_btn, model_dd], api_name="switch")
+        controls = [model_status, go, switch_btn, stop_btn, model_dd]
+        switch_btn.click(do_switch, model_dd, controls, api_name="switch")
+        stop_btn.click(do_stop, None, controls, api_name="stop")
         demo.load(load_state, None, [model_dd, model_status])
     else:
         demo.load(lambda: _sync_family() and None)

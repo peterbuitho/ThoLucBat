@@ -191,6 +191,23 @@ def switch(key: str, timeout: float = 420.0) -> Iterator[tuple[bool, str]]:
         _lock.release()
 
 
+def stop() -> Iterator[tuple[bool, str]]:
+    """Shut the local vLLM server down and free the GPU. Yields (finished, message) progress updates."""
+    if not is_local_server():
+        raise RuntimeError("Refusing to stop: VIETPOET_BASE_URL is not a local vLLM server.")
+    if not _lock.acquire(blocking=False):
+        raise RuntimeError("A model switch is in progress.")
+    try:
+        if current_key() is None and not _vllm_pids():
+            yield True, "No model server is running."
+            return
+        yield False, "Shutting down the model server..."
+        stop_server()
+        yield True, "Model server stopped; the GPU is free."
+    finally:
+        _lock.release()
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else "status"
     if cmd == "list":
@@ -201,8 +218,8 @@ def main(argv: list[str]) -> int:
     elif cmd == "status":
         print(current_key() or "no server running")
     elif cmd == "stop":
-        stop_server()
-        print("stopped")
+        for _, msg in stop():
+            print(msg, flush=True)
     elif cmd == "switch" and len(argv) == 2:
         try:
             for done, msg in switch(argv[1]):

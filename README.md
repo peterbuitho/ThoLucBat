@@ -244,10 +244,11 @@ Switching between the 4B, 9B and Gemma 4 models (only one fits on the GPU at a t
 ```bash
 scripts/switch_model.sh list              # which models exist, which one is running
 scripts/switch_model.sh 9b                # stop the current one, load this one, wait until ready (~1 min)
+scripts/switch_model.sh stop              # shut vLLM down and free the GPU (e.g. before training)
 VIETPOET_ALLOW_SWITCH=1 VIETPOET_HOST=<lan-address> .venv/bin/python -m app.webui   # page with a model dropdown
 ```
 
-The dropdown is **opt-in and for the home network only**: it does not exist unless `VIETPOET_ALLOW_SWITCH=1`,
+The page's model section (dropdown plus "stop model" button, which does the same as `stop`) is **opt-in and for the home network only**: it does not exist unless `VIETPOET_ALLOW_SWITCH=1`,
 it accepts requests only from loopback / private (RFC 1918, link-local) addresses, it refuses anything carrying
 proxy headers (so it stays disabled behind a reverse proxy or tunnel), and it only ever acts on a vLLM
 server at 127.0.0.1. Leave the variable unset for anything reachable from the internet.

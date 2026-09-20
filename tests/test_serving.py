@@ -57,3 +57,28 @@ def test_serve_script_is_offline_and_local_only():
     script = (serving.ROOT / "scripts" / "serve.sh").read_text()
     assert "--host 127.0.0.1" in script                       # vLLM never listens on the network
     assert "VLLM_NO_USAGE_STATS=1" in script and "HF_HUB_OFFLINE=1" in script
+
+
+def test_stop_refuses_a_remote_server(monkeypatch):
+    monkeypatch.setattr(serving, "BASE_URL", "http://192.168.1.50:8000/v1")
+    with pytest.raises(RuntimeError, match="not a local"):
+        list(serving.stop())
+
+
+def test_stop_and_switch_share_one_lock(monkeypatch):
+    monkeypatch.setattr(serving, "current_key", lambda: "4b")
+    assert serving._lock.acquire(blocking=False)
+    try:
+        assert serving.is_switching()
+        with pytest.raises(RuntimeError, match="in progress"):
+            list(serving.stop())
+    finally:
+        serving._lock.release()
+    assert not serving.is_switching()
+
+
+def test_stop_does_nothing_when_no_server_is_running(monkeypatch):
+    monkeypatch.setattr(serving, "current_key", lambda: None)
+    monkeypatch.setattr(serving, "_vllm_pids", lambda: [])
+    monkeypatch.setattr(serving, "stop_server", lambda: (_ for _ in ()).throw(AssertionError("must not kill anything")))
+    assert list(serving.stop()) == [(True, "No model server is running.")]
