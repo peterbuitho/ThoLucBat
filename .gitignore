@@ -1,0 +1,12 @@
+.venv
+__pycache__/
+models/
+data/raw/
+data/eval/*
+!data/eval/summary.jsonl
+data/generations.jsonl
+data/feedback.jsonl
+unsloth_compiled_cache/
+runs/*/train.log
+.venv-server
+.pytest_cache/
