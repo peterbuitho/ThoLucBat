@@ -76,8 +76,8 @@ class PoetAgent:
             except BadRequestError as e:
                 msg = str(e).lower()
                 limit = re.search(r"<=\s*(\d+)", msg)
-                if n > 1 and ("'n'" in msg or "field n" in msg or "n_" in msg):
-                    self._max_n = int(limit.group(1)) if limit else 1     # server caps n (llama.cpp: number of slots)
+                if n > 1 and ("'n'" in msg or "field n" in msg or "n_" in msg or "one completion" in msg):
+                    self._max_n = int(limit.group(1)) if limit else 1     # server caps n (llama.cpp: slots; LM Studio: 1)
                 elif self._use_logprobs:
                     self._use_logprobs = False                              # server rejects logprobs: rank without them
                 elif n > 1:

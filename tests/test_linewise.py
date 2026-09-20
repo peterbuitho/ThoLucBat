@@ -205,6 +205,21 @@ def test_learns_the_servers_n_limit_from_the_error_and_splits_the_request():
     assert a._complete_lines("p", 8, 0.9) and max(seen[5:]) == 4   # remembered: never asks for more than 4 again
 
 
+def test_lm_studio_one_completion_limit_does_not_switch_off_logprobs():
+    seen = []
+
+    def create(**kw):
+        seen.append((kw["n"], "logprobs" in kw))
+        if kw["n"] > 1:
+            raise _bad_request("Error code: 400 - {'error': 'LM Studio /v1/completions currently supports only one completion per request.'}")
+        return NS(choices=[NS(text="x", logprobs=None)])
+
+    a = _server(create)
+    assert len(a._complete_lines("p", 4, 0.9)) == 4
+    assert a._max_n == 1 and a._use_logprobs is True
+    assert seen[0] == (4, True) and all(s == (1, True) for s in seen[1:])   # one failed try, then 4 x n=1 with logprobs
+
+
 def test_drops_logprobs_when_the_server_rejects_them():
     seen = []
 
