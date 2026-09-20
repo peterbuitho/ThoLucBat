@@ -124,9 +124,7 @@ Raw outputs: `data/eval/*.jsonl` (local, git-ignored); summary rows: `data/eval/
 
 ## What was done, end to end
 
-1. **Environment.** Verified the 4090 (the shell runs inside a VSCodium Flatpak sandbox, so
-   `nvidia-smi` lives at `/run/host/usr/bin/nvidia-smi`). Unsloth and `unsloth/Qwen3.5-4B` were
-   already installed. Created two venvs under `~/.venvs`: app (`.venv`) and vLLM (`.venv-server`).
+1. **Environment.** Kubuntu 26.04, RTX4090, shell runs inside a VSCodium, Unsloth and vLLM.
 2. **Validator first** ([app/validator.py](app/validator.py)). Pure Python, no LLM. Reports
    errors down to line and syllable ("Câu 3, tiếng thứ 4 'quê' ... cần thanh trắc"), which
    is what the repair prompt needs. I wrote my own instead of using the paper's
