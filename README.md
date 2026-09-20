@@ -74,9 +74,44 @@ How to read it:
   are met, not that the poems are better; meaning and beauty still need human judgment.
   Poems can still be off-topic or odd ("nhớ mẹ đón chồng").
 
+### Larger models: Qwen3.5-9B and Gemma 4 12B
+
+Same data, same training settings (LoRA r=16, 2 epochs, 8,000 poems), same 100 "8 câu" prompts and same
+scoring; only the base model changes (`unsloth/Qwen3.5-9B`, `unsloth/gemma-4-12b-it`).
+
+Raw output, one sample per prompt (no repair, no sampling tricks):
+
+| Model | Score | Tone | Rhyme | Valid | Poems with a tone error | 6th/8th-syllable rule broken |
+|---|---|---|---|---|---|---|
+| Qwen3.5-4B | 0.812 | 0.920 | 0.728 | 12% | 93% | 38% of bát lines |
+| Qwen3.5-9B | 0.829 | 0.941 | 0.746 | 14% | 63% | 10% |
+| Gemma 4 12B | 0.844 | 0.950 | 0.767 | 18% | 55% | 3% |
+
+With line-by-line sampling (16 candidates per line, repetition penalty):
+
+| Model | Score | Tone | Rhyme | Valid | Independent score | distinct-2 | Repeated openings |
+|---|---|---|---|---|---|---|---|
+| Qwen3.5-4B | 0.994 | 1.000 | 0.990 | 98% | 0.956 | 0.98 | 0.13 |
+| Qwen3.5-9B | 0.994 | 1.000 | 0.990 | 98% | 0.955 | 0.97 | 0.14 |
+| Gemma 4 12B | 0.996 | 1.000 | 0.993 | 100% | 0.960 | 0.99 | 0.13 |
+
+How to read it:
+- **A bigger model fixes most of the tone weakness on its own**: the 6th/8th-syllable rule that the 4B broke in
+  38% of bát lines drops to 10% (9B) and 3% (Gemma). Rhyme improves only a little, so the raw score moves from
+  0.81 to 0.84.
+- **With line-by-line sampling the three models are equivalent on the rules** (0.994-0.996). The sampler alone
+  removes the tone problem at every size, so extra parameters buy little for *form*. Whether the larger models write
+  *better poems* is a question for human judgment, not for these scores.
+- The 4B is the cheapest to run: 100 poems in about 1.5 min line by line, versus 2-3.7 min for the others.
+- Caveats: Gemma 4 was served in FP8 (its 16-bit weights are 23 GB and do not fit on a 24 GB card), the Qwen
+  models in 16-bit; 100 prompts, one run each. Eval loss is not comparable across models (different tokenizers).
+- Gemma 4 needs a newer `transformers` than Unsloth Studio ships, so it was trained from a separate environment
+  with the same Unsloth/TRL/PEFT versions; its chat template, end token and raw-prompt format differ from Qwen
+  (see `--end-token` in `scripts/train_sft.py` and `VIETPOET_FAMILY` in `app/prompts.py`).
+
 ### Tests
 
-`pytest` (34 tests, no GPU or server needed):
+`pytest` (35 tests, no GPU or server needed; the Gemma tokenizer test is skipped offline):
 - validator: every rule, near-rhymes, duplicate lines, odd line counts, syllable parsing, output cleaning;
 - sampler: run against a scripted fake model, covering rule-abiding line beats a more probable illegal one,
   fallback to fewest violations, extra rounds, repeated rhyme words, repetition penalty;
@@ -128,22 +163,30 @@ Raw outputs: `data/eval/*.jsonl` (local, git-ignored); summary rows: `data/eval/
    at inference (thinking disabled).
 7. **Training** ([scripts/train_sft.py](scripts/train_sft.py)), headless Unsloth QLoRA.
 8. **Merge + serve + evaluate** the fine-tuned model, raw and with the agent loop.
+9. **Diagnose and fix tone** with line-by-line sampling, then **repeat with larger models** (Qwen3.5-9B, Gemma 4 12B) for a
+   like-for-like comparison.
 
 ## Training parameters
 
-Saved automatically to [runs/sft-v1/train_config.json](runs/sft-v1/train_config.json) with package
-versions; loss curves in `runs/sft-v1/log_history.json`.
+Saved automatically per run to `runs/<name>/train_config.json` (with package versions) and
+`runs/<name>/log_history.json` (loss curves): [sft-v1](runs/sft-v1), [sft-9b-v1](runs/sft-9b-v1),
+[sft-gemma4-12b-v1](runs/sft-gemma4-12b-v1).
 
-| | |
-|---|---|
-| Base model | `unsloth/Qwen3.5-4B`, 4-bit (QLoRA) |
-| LoRA | r=16, alpha=16, dropout=0, all attention + MLP projections (21.2M trainable, 0.47%) |
-| Optimiser | AdamW 8-bit, lr 2e-4, linear schedule, warmup 3%, weight decay 0.01 |
-| Batch | 2 x grad-accum 4 = 8; 2 epochs = 2,000 steps; max length 1024 |
-| Loss | completion only (the poem, not the request) |
-| Time | ~21 min on the 4090 |
-| Loss | train 3.84 -> 2.77; eval 3.20 -> 2.87, still falling slowly, no overfitting |
-| Software | unsloth 2026.9.7, trl 0.23.1, peft 0.18.1, torch 2.11 |
+| | Qwen3.5-4B | Qwen3.5-9B | Gemma 4 12B |
+|---|---|---|---|
+| Base model | `unsloth/Qwen3.5-4B` | `unsloth/Qwen3.5-9B` | `unsloth/gemma-4-12b-it` |
+| Precision | 4-bit QLoRA | 4-bit QLoRA | 4-bit QLoRA |
+| LoRA | r=16, alpha=16, dropout=0, all attention + MLP projections | same | same |
+| Trainable parameters | 21.2M (0.47%) | 29.1M (0.31%) | 65.6M (0.55%) |
+| Optimiser | AdamW 8-bit, lr 2e-4, linear schedule, warmup 3%, weight decay 0.01 | same | same |
+| Batch | 2 x grad-accum 4 = 8; 2 epochs = 2,000 steps; max length 1024 | same | same |
+| Loss target | completion only (the poem, not the request) | same | same |
+| Time on the 4090 | ~21 min | ~30 min | ~46 min |
+| Train loss | 3.84 -> 2.77 | 3.68 -> 2.60 | 5.17 -> 2.41 |
+| Eval loss | 3.20 -> 2.87 | 2.98 -> 2.72 | 2.70 -> 2.50 |
+| Software | unsloth 2026.9.7, trl 0.23.1, peft 0.18.1, torch 2.11; transformers 5.5.0 | same | same, transformers 5.17.0 |
+
+The eval loss was still falling slowly at the end of every run, with no sign of overfitting.
 
 ## Project layout
 
@@ -169,9 +212,18 @@ export OPENSSL_CONF=/dev/null LD_LIBRARY_PATH=/run/host/usr/lib/x86_64-linux-gnu
 ~/.unsloth/studio/unsloth_studio/bin/python scripts/train_sft.py --name sft-v1
 ~/.unsloth/studio/unsloth_studio/bin/python scripts/merge_adapter.py sft-v1
 
+# 2b. other models: same script, different base model
+~/.unsloth/studio/unsloth_studio/bin/python scripts/train_sft.py --name sft-9b-v1 --base-model unsloth/Qwen3.5-9B
+#     Gemma 4 needs transformers >= 5.17 (newer than Studio's), so use an environment with it, plus its end token:
+python scripts/train_sft.py --name sft-gemma4-12b-v1 --base-model unsloth/gemma-4-12b-it --end-token "<turn|>"
+
 # 3. serve + evaluate (stop the server before training: VRAM)
 bash scripts/serve.sh ~/vietpoet-models/sft-v1/merged
 .venv/bin/python scripts/evaluate.py --model vietpoet --tag sft-v1 --mode raw     # or --mode agent
+
+#    9B: VLLM_GPU_UTIL=0.90 bash scripts/serve.sh <model> --max-num-batched-tokens 1024 --max-num-seqs 32
+#    Gemma 4: VIETPOET_FAMILY=gemma VLLM_GPU_UTIL=0.90 bash scripts/serve.sh <model> --quantization fp8 \
+#             --max-num-batched-tokens 2560 --max-num-seqs 32 --limit-mm-per-prompt '{"image":0,"audio":0}'
 
 # 3b. line-by-line sampling, and the tests
 .venv/bin/python scripts/evaluate.py --model vietpoet --tag sft-v1-lw16 --mode linewise --only-8
@@ -183,12 +235,11 @@ bash scripts/serve.sh ~/vietpoet-models/sft-v1/merged
 
 ## Limits and next steps
 
-- **Planned: larger models.** Same data and training script, compared on the same evaluation: `unsloth/Qwen3.5-9B`
-  (same family as the 4B) and Gemma 4 (`unsloth/gemma-4-12b-it`, a different family; needs a different chat
-  template and end token).
+- Form scores cannot say whether the larger models write *better* poems; that needs human comparison of
+  the three models' line-by-line output.
 - Form only: no automatic check of meaning, imagery or naturalness; those need human judgment.
 - Topic-following is weak because prompts came from titles; generate richer per-poem summaries
   with an LLM and retrain.
 - Line-by-line sampling commits to each line greedily; a beam or backtracking search could help later lines.
   Preference training (DPO) on human choices could then improve meaning, not just form.
-- Only lục-bát; a single 4B model and a single training run so far.
+- Only lục-bát; three models, one training run each, evaluated on 100 prompts.

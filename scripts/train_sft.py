@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ap = argparse.ArgumentParser()
 ap.add_argument("--name", required=True)
 ap.add_argument("--base-model", default="unsloth/Qwen3.5-4B")
+ap.add_argument("--end-token", default="<|im_end|>", help='end-of-turn token appended to the poem (Gemma 4: "<turn|>")')
 ap.add_argument("--train", type=Path, default=ROOT / "data/train.jsonl")
 ap.add_argument("--val", type=Path, default=ROOT / "data/validation.jsonl")
 ap.add_argument("--max-seq-length", type=int, default=1024)
@@ -71,7 +72,7 @@ model = FastLanguageModel.get_peft_model(
 def to_row(line: str) -> dict:
     msgs = json.loads(line)["messages"]
     prompt = text_tok.apply_chat_template(msgs[:-1], tokenize=False, add_generation_prompt=True, enable_thinking=False)
-    return {"prompt": prompt, "completion": msgs[-1]["content"] + "<|im_end|>\n"}
+    return {"prompt": prompt, "completion": msgs[-1]["content"] + args.end_token + "\n"}
 
 
 def load(path: Path, limit: int = 0) -> Dataset:
@@ -93,6 +94,9 @@ trainer = SFTTrainer(
         logging_steps=10, eval_strategy="steps", eval_steps=args.eval_steps,
         save_strategy="steps", save_steps=args.save_steps, save_total_limit=2, report_to="none",
         completion_only_loss=True, dataset_num_proc=1))
+ids = trainer.train_dataset[0]["input_ids"]
+print("FIRST TOKENS:", ids[:8], "| bos count:", ids.count(text_tok.bos_token_id) if text_tok.bos_token_id is not None else "n/a",
+      "| last tokens:", text_tok.convert_ids_to_tokens(ids[-4:]), flush=True)
 trainer.train()
 
 (run_dir / "log_history.json").write_text(json.dumps(trainer.state.log_history, indent=1))

@@ -1,6 +1,7 @@
 """Prompt templates shared by dataset preparation, evaluation, and the agent."""
 from __future__ import annotations
 
+import os
 import random
 
 SYSTEM_PROMPT = "Bạn là nhà thơ Việt Nam chuyên sáng tác thơ lục bát."
@@ -78,12 +79,20 @@ def make_repair_request(request: str, poem: str, report) -> str:
     )
 
 
-def render_prompt(request: str) -> str:
-    """Raw Qwen3.5 chat prompt (thinking off), identical to training-time apply_chat_template output.
+def render_prompt(request: str, family: str | None = None) -> str:
+    """Raw chat prompt (thinking off), identical to the tokenizer's chat template output.
 
     Needed for line-by-line generation through the /v1/completions endpoint, where we append the
-    lines written so far to the assistant turn.
+    lines written so far to the assistant turn. Family comes from VIETPOET_FAMILY (qwen | gemma).
     """
+    family = family or os.environ.get("VIETPOET_FAMILY", "qwen")
+    if family == "gemma":
+        # Gemma 4: the tokenizer does not add <bos> itself, so it is part of the text.
+        return (
+            f"<bos><|turn>system\n{SYSTEM_PROMPT}<turn|>\n"
+            f"<|turn>user\n{request}<turn|>\n"
+            "<|turn>model\n<|channel>thought\n<channel|>"
+        )
     return (
         f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
         f"<|im_start|>user\n{request}<|im_end|>\n"

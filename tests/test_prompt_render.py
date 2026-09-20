@@ -19,3 +19,14 @@ def test_render_prompt_matches_tokenizer_chat_template():
     tok = transformers.AutoTokenizer.from_pretrained(str(MODEL))
     expected = tok.apply_chat_template(chat("Viết thơ."), tokenize=False, add_generation_prompt=True, enable_thinking=False)
     assert render_prompt("Viết thơ.") == expected
+
+
+def test_render_prompt_gemma_matches_tokenizer_chat_template():
+    transformers = pytest.importorskip("transformers")
+    try:
+        tok = transformers.AutoTokenizer.from_pretrained("unsloth/gemma-4-12b-it")
+    except Exception:
+        pytest.skip("Gemma 4 tokenizer not available offline")
+    expected = tok.apply_chat_template(chat("Viết thơ."), tokenize=False, add_generation_prompt=True, enable_thinking=False)
+    assert render_prompt("Viết thơ.", family="gemma") == expected
+    assert expected.startswith("<bos>") and expected.count("<bos>") == 1

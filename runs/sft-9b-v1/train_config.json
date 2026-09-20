@@ -1,0 +1,43 @@
+{
+  "name": "sft-9b-v1",
+  "base_model": "unsloth/Qwen3.5-9B",
+  "train": "/mnt/ntfs/repos/Py/VietPoet/data/train.jsonl",
+  "val": "/mnt/ntfs/repos/Py/VietPoet/data/validation.jsonl",
+  "max_seq_length": 1024,
+  "load_in_4bit": 1,
+  "lora_r": 16,
+  "lora_alpha": 16,
+  "lora_dropout": 0.0,
+  "lr": 0.0002,
+  "epochs": 2,
+  "batch_size": 2,
+  "grad_accum": 4,
+  "optim": "adamw_8bit",
+  "warmup_ratio": 0.03,
+  "weight_decay": 0.01,
+  "lr_scheduler": "linear",
+  "eval_samples": 100,
+  "eval_steps": 200,
+  "save_steps": 500,
+  "max_steps": -1,
+  "seed": 3407,
+  "merge": false,
+  "target_modules": [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj"
+  ],
+  "versions": {
+    "unsloth": "2026.9.7",
+    "unsloth_zoo": "2026.9.6",
+    "trl": "0.23.1",
+    "peft": "0.18.1",
+    "transformers": "5.5.0",
+    "torch": "2.11.0+cu130",
+    "bitsandbytes": "0.50.2"
+  }
+}
