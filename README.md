@@ -239,6 +239,17 @@ logs each poem and thumbs up/down (`data/generations.jsonl`, `data/feedback.json
 to the local vLLM server; vLLM listens on 127.0.0.1, and telemetry is off (`VLLM_NO_USAGE_STATS`,
 `DO_NOT_TRACK`, Gradio analytics, `HF_HUB_OFFLINE` for local models).
 
+Start and stop everything with one script (the model server plus the page):
+
+```bash
+scripts/poet.sh start [4b|9b|gemma] [--lan]   # load the model (default 4b), then start the page
+scripts/poet.sh stop                          # stop the page and shut vLLM down, freeing the GPU
+scripts/poet.sh status                        # what is running, and the page address
+```
+
+The page listens on this machine only (`http://127.0.0.1:7860`); `--lan` binds it to the machine's home-network
+address instead (refused unless that address is private), so phones and laptops at home can use it.
+
 Switching between the 4B, 9B and Gemma 4 models (only one fits on the GPU at a time):
 
 ```bash
@@ -252,6 +263,31 @@ The page's model section (dropdown plus "stop model" button, which does the same
 it accepts requests only from loopback / private (RFC 1918, link-local) addresses, it refuses anything carrying
 proxy headers (so it stays disabled behind a reverse proxy or tunnel), and it only ever acts on a vLLM
 server at 127.0.0.1. Leave the variable unset for anything reachable from the internet.
+
+## Using the models without vLLM (GGUF, LM Studio, llama.cpp)
+
+The 4B and 9B models are also exported as GGUF (llama.cpp's format, used by LM Studio): `Q8_0` (near-lossless) and
+`Q4_K_M` (about 60% smaller), converted with llama.cpp's `convert_hf_to_gguf.py` and `llama-quantize`.
+
+| File | Size |
+|---|---|
+| `VietPoet-Qwen3.5-4B-Q8_0.gguf` / `-Q4_K_M.gguf` | 4.6 GB / 2.8 GB |
+| `VietPoet-Qwen3.5-9B-Q8_0.gguf` / `-Q4_K_M.gguf` | 9.8 GB / 5.8 GB |
+
+Quality is unchanged: on 40 prompts the 4B `Q8_0` scored 0.995 (all poems valid) with the line-by-line sampler, against
+0.994 for the 16-bit model on the same prompts.
+
+The sampler talks to any OpenAI-compatible server, so the same page works against LM Studio or `llama-server`:
+`VIETPOET_BASE_URL=http://localhost:1234/v1 VIETPOET_MODEL=<model name> python -m app.webui`. Servers differ from vLLM,
+so the sampler adapts: it reads log-probabilities in either format, learns a server's cap on samples per request
+(llama.cpp allows at most as many as it has parallel slots) and splits the request, and falls back to picking without
+log-probabilities if a server has none. On Windows there is `scripts/run_lmstudio.bat` (create a venv first:
+`py -m venv .venv-win`, then `.venv-win\Scripts\pip install -r requirements.txt`). The model switcher is Linux-only.
+
+Speed for one 8-line poem (16 candidates per line unless noted): vLLM on the RTX 4090 about 2 s; `llama-server` on the 4090 about
+24 s with 16 parallel slots (37 s with 4, so raise LM Studio's concurrent predictions if it has that setting); CPU only,
+4 cores of a fast desktop chip, `Q4_K_M`, 4 candidates per line: about 17 s. LM Studio itself has not been tested; the
+llama.cpp server was.
 
 ## Limits and next steps
 

@@ -6,7 +6,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
-from openai import OpenAI
+from concurrent.futures import ThreadPoolExecutor
+
+from openai import BadRequestError, OpenAI
 
 from .prompts import chat, make_repair_request, make_request, render_prompt
 from .validator import PoemReport, evaluate_poem
@@ -41,6 +43,8 @@ class PoetAgent:
         )
         self.model = model or os.environ.get("VIETPOET_MODEL", "vietpoet")
         self.family = family or os.environ.get("VIETPOET_FAMILY", "qwen")   # raw-prompt format: qwen | gemma
+        self._use_logprobs = True
+        self._max_n: int | None = None   # learned: largest n per request the server accepts
         self.n_candidates = n_candidates
         self.n_repairs = n_repairs
         self.max_rounds = max_rounds
@@ -60,15 +64,54 @@ class PoetAgent:
         )
         return [THINK_RE.sub("", c.message.content or "").strip() for c in resp.choices]
 
+    def _completion_choices(self, prompt: str, n: int, temperature: float) -> list:
+        """One completions request. Adapts to servers that reject logprobs or cap/ignore n (llama.cpp, LM Studio)."""
+        for _ in range(4):
+            n = min(n, self._max_n or n)
+            kwargs = dict(model=self.model, prompt=prompt, n=n, temperature=temperature, top_p=0.95, max_tokens=60, stop=["\n"])
+            if self._use_logprobs:
+                kwargs["logprobs"] = 1   # vLLM answers with token_logprobs, llama.cpp/LM Studio with a "content" list
+            try:
+                return list(self.client.completions.create(**kwargs).choices)
+            except BadRequestError as e:
+                msg = str(e).lower()
+                limit = re.search(r"<=\s*(\d+)", msg)
+                if n > 1 and ("'n'" in msg or "field n" in msg or "n_" in msg):
+                    self._max_n = int(limit.group(1)) if limit else 1     # server caps n (llama.cpp: number of slots)
+                elif self._use_logprobs:
+                    self._use_logprobs = False                              # server rejects logprobs: rank without them
+                elif n > 1:
+                    self._max_n = 1
+                else:
+                    raise
+        raise RuntimeError("completions request kept failing")
+
+    @staticmethod
+    def _mean_logprob(choice) -> float | None:
+        lp = getattr(choice, "logprobs", None)
+        if lp is None:
+            return None
+        vals = getattr(lp, "token_logprobs", None)
+        if not vals:
+            content = (getattr(lp, "model_extra", None) or {}).get("content") or getattr(lp, "content", None)
+            vals = [t.get("logprob") if isinstance(t, dict) else getattr(t, "logprob", None) for t in content] if content else None
+        vals = [v for v in (vals or []) if v is not None]
+        return sum(vals) / len(vals) if vals else None
+
     def _complete_lines(self, prompt: str, n: int, temperature: float) -> list[tuple[str, float]]:
         """Sample n continuations of `prompt`, each cut at the first newline. Returns (line, mean logprob)."""
-        resp = self.client.completions.create(
-            model=self.model, prompt=prompt, n=n, temperature=temperature, top_p=0.95,
-            max_tokens=60, stop=["\n"], logprobs=0)
+        choices = self._completion_choices(prompt, n, temperature)
+        missing = n - len(choices)
+        if missing > 0:   # server capped or ignored n: top up with parallel smaller requests
+            chunk = self._max_n or 1
+            sizes = [min(chunk, missing - k) for k in range(0, missing, chunk)]
+            with ThreadPoolExecutor(min(len(sizes), 8)) as ex:
+                more = list(ex.map(lambda k: self._completion_choices(prompt, k, temperature), sizes))
+            choices += [c for cs in more for c in cs]
         out = []
-        for c in resp.choices:
-            lps = [x for x in (c.logprobs.token_logprobs if c.logprobs else []) if x is not None]
-            out.append((c.text.strip(), sum(lps) / len(lps) if lps else float("-inf")))
+        for c in choices[:n]:
+            lp = self._mean_logprob(c)
+            out.append(((c.text or "").strip(), lp if lp is not None else 0.0))
         return out
 
     @staticmethod

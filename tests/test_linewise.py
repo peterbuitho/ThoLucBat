@@ -17,6 +17,8 @@ class FakeAgent(PoetAgent):
         self.script, self.calls, self.prompts = script, 0, []
         self.temperature = 0.9
         self.family = "qwen"
+        self._use_logprobs = True
+        self._max_n = None
 
     def _complete_lines(self, prompt, n, temperature):
         self.prompts.append(prompt)
@@ -122,3 +124,98 @@ def test_penalty_changes_the_choice_among_legal_lines_but_never_picks_an_illegal
     no_pen = FakeAgent(script).create_poem_linewise("x", 2, candidates=3, rep_penalty=0.0)
     assert with_pen.poem.splitlines()[1] == FRESH
     assert no_pen.poem.splitlines()[1] == STALE          # most probable legal line; TOO_LONG is never chosen
+
+
+# ---- compatibility with servers other than vLLM (llama.cpp / LM Studio) ----
+
+from types import SimpleNamespace as NS
+
+
+def test_mean_logprob_vllm_style():
+    c = NS(logprobs=NS(token_logprobs=[-1.0, -3.0, None], model_extra={}))
+    assert PoetAgent._mean_logprob(c) == -2.0
+
+
+def test_mean_logprob_llamacpp_style():
+    c = NS(logprobs=NS(token_logprobs=None, model_extra={"content": [{"token": "a", "logprob": -0.5}, {"token": "b", "logprob": -1.5}]}))
+    assert PoetAgent._mean_logprob(c) == -1.0
+
+
+def test_mean_logprob_missing_is_none():
+    assert PoetAgent._mean_logprob(NS(logprobs=None)) is None
+    assert PoetAgent._mean_logprob(NS(logprobs=NS(token_logprobs=None, model_extra={}))) is None
+
+
+def test_tops_up_with_single_requests_when_server_ignores_n():
+    calls = []
+
+    class OneAtATime(FakeAgent):
+        _complete_lines = PoetAgent._complete_lines                      # use the real method
+
+        def _completion_choices(self, prompt, n, temperature):
+            calls.append(n)
+            return [NS(text=f" line{len(calls)} ", logprobs=None)]      # always a single choice, no logprobs
+
+    out = OneAtATime({})._complete_lines("p", 5, 0.9)
+    assert len(out) == 5 and calls[0] == 5 and calls[1:] == [1, 1, 1, 1]
+    assert all(lp == 0.0 for _, lp in out) and out[0][0] == "line1"      # text stripped, missing logprob -> 0
+
+
+def test_no_logprobs_still_picks_a_clean_line_and_applies_the_penalty():
+    class NoLogprobs(FakeAgent):
+        _complete_lines = PoetAgent._complete_lines
+
+        def _completion_choices(self, prompt, n, temperature):
+            lines = {0: [KIEU[0]], 1: [KIEU[1]]}[len(self.prompts_lines(prompt))]
+            return [NS(text=t, logprobs=None) for t in lines]
+
+    res = NoLogprobs({}).create_poem_linewise("x", 2, candidates=1)
+    assert res.poem.splitlines() == KIEU[:2]
+
+
+import httpx
+from openai import BadRequestError
+
+
+def _bad_request(message):
+    return BadRequestError(message, response=httpx.Response(400, request=httpx.Request("POST", "http://x/v1/completions")), body=None)
+
+
+def _server(create):
+    a = FakeAgent({})
+    a._complete_lines = lambda *args: PoetAgent._complete_lines(a, *args)
+    a._completion_choices = lambda *args: PoetAgent._completion_choices(a, *args)
+    a.client, a.model = NS(completions=NS(create=create)), "m"
+    return a
+
+
+def test_learns_the_servers_n_limit_from_the_error_and_splits_the_request():
+    seen = []
+
+    def create(**kw):
+        seen.append(kw["n"])
+        if kw["n"] > 4:
+            raise _bad_request("Error code: 400 - {'message': \"Field 'n': Value must be between 1 <= value <= 4, but got 16\"}")
+        return NS(choices=[NS(text=f"l{len(seen)}", logprobs=None)] * kw["n"])
+
+    a = _server(create)
+    out = a._complete_lines("p", 16, 0.9)
+    assert len(out) == 16 and a._max_n == 4
+    assert seen[0] == 16 and sorted(seen[1:]) == [4, 4, 4, 4]      # first try fails, then 4 x 4
+    assert a._complete_lines("p", 8, 0.9) and max(seen[5:]) == 4   # remembered: never asks for more than 4 again
+
+
+def test_drops_logprobs_when_the_server_rejects_them():
+    seen = []
+
+    def create(**kw):
+        seen.append("logprobs" in kw)
+        if "logprobs" in kw:
+            raise _bad_request("logprobs is not supported")
+        return NS(choices=[NS(text="x", logprobs=None)] * kw["n"])
+
+    a = _server(create)
+    assert len(a._complete_lines("p", 3, 0.9)) == 3 and a._use_logprobs is False
+    assert seen == [True, False]
+    a._complete_lines("p", 3, 0.9)
+    assert seen[2:] == [False]                                      # not retried with logprobs again

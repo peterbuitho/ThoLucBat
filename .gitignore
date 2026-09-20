@@ -11,3 +11,4 @@ runs/*/train.log
 .venv-server
 .pytest_cache/
 run/
+.venv-win/
