@@ -18,6 +18,7 @@ class FakeAgent(PoetAgent):
         self.temperature = 0.9
         self.family = "qwen"
         self._use_logprobs = True
+        self._logprobs_arg = 1
         self._max_n = None
 
     def _complete_lines(self, prompt, n, temperature):
@@ -234,3 +235,35 @@ def test_drops_logprobs_when_the_server_rejects_them():
     assert seen == [True, False]
     a._complete_lines("p", 3, 0.9)
     assert seen[2:] == [False]                                      # not retried with logprobs again
+
+
+def test_mlx_server_wants_logprobs_true_and_drops_the_connection_on_an_int():
+    import httpx
+    from openai import APIConnectionError
+    seen = []
+
+    def create(**kw):
+        seen.append(kw.get("logprobs"))
+        if kw.get("logprobs") is not True:
+            raise APIConnectionError(request=httpx.Request("POST", "http://x/v1/completions"))
+        return NS(choices=[NS(text="x", logprobs=None)])
+
+    a = _server(create)
+    assert len(a._complete_lines("p", 1, 0.9)) == 1
+    assert seen == [1, True] and a._use_logprobs is True
+    a._complete_lines("p", 1, 0.9)
+    assert seen[2:] == [True]                                       # remembered
+
+
+def test_connection_errors_switch_logprobs_off_and_then_propagate():
+    import httpx
+    import pytest
+    from openai import APIConnectionError
+
+    def create(**kw):
+        raise APIConnectionError(request=httpx.Request("POST", "http://x/v1/completions"))
+
+    a = _server(create)
+    with pytest.raises(APIConnectionError):
+        a._complete_lines("p", 1, 0.9)
+    assert a._use_logprobs is False

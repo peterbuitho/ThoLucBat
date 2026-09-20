@@ -8,7 +8,7 @@ from typing import Callable
 
 from concurrent.futures import ThreadPoolExecutor
 
-from openai import BadRequestError, OpenAI
+from openai import APIConnectionError, BadRequestError, OpenAI
 
 from .prompts import chat, make_repair_request, make_request, render_prompt
 from .validator import PoemReport, evaluate_poem
@@ -44,6 +44,7 @@ class PoetAgent:
         self.model = model or os.environ.get("VIETPOET_MODEL", "vietpoet")
         self.family = family or os.environ.get("VIETPOET_FAMILY", "qwen")   # raw-prompt format: qwen | gemma
         self._use_logprobs = True
+        self._logprobs_arg: int | bool = 1   # vLLM/llama.cpp/LM Studio take an int; mlx_lm.server insists on a bool
         self._max_n: int | None = None   # learned: largest n per request the server accepts
         self.n_candidates = n_candidates
         self.n_repairs = n_repairs
@@ -70,9 +71,17 @@ class PoetAgent:
             n = min(n, self._max_n or n)
             kwargs = dict(model=self.model, prompt=prompt, n=n, temperature=temperature, top_p=0.95, max_tokens=60, stop=["\n"])
             if self._use_logprobs:
-                kwargs["logprobs"] = 1   # vLLM answers with token_logprobs, llama.cpp/LM Studio with a "content" list
+                kwargs["logprobs"] = self._logprobs_arg   # vLLM answers with token_logprobs, llama.cpp/LM Studio/mlx with a "content" list
             try:
                 return list(self.client.completions.create(**kwargs).choices)
+            except APIConnectionError:
+                # mlx_lm.server raises on logprobs=1 (it wants true) and closes the connection without an HTTP error
+                if self._use_logprobs and self._logprobs_arg is not True:
+                    self._logprobs_arg = True
+                elif self._use_logprobs:
+                    self._use_logprobs = False
+                else:
+                    raise
             except BadRequestError as e:
                 msg = str(e).lower()
                 limit = re.search(r"<=\s*(\d+)", msg)
