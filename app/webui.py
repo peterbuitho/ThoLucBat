@@ -25,11 +25,13 @@ DATA = Path(__file__).resolve().parent.parent / "data"
 LOG = DATA / "generations.jsonl"
 FEEDBACK = DATA / "feedback.jsonl"
 ALLOW_SWITCH = os.environ.get("VIETPOET_ALLOW_SWITCH") == "1"
+CANDIDATES = int(os.environ.get("VIETPOET_CANDIDATES", "16"))   # samples per line; fewer is faster on slow machines
 
 agent = PoetAgent()
 
 
 def _append(path: Path, rec: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
@@ -42,7 +44,7 @@ def make_poem(topic: str, n_lines: int):
         raise gr.Error("Đang đổi mô hình, vui lòng đợi một chút rồi thử lại.")
     if _sync_family() is None:
         raise gr.Error("Chưa có mô hình nào đang chạy." + (" Hãy mở mục Mô hình và chọn một mô hình." if ALLOW_SWITCH else ""))
-    res = agent.create_poem_linewise(topic, int(n_lines))
+    res = agent.create_poem_linewise(topic, int(n_lines), candidates=CANDIDATES)
     r = res.report
     rec = {"id": uuid.uuid4().hex[:12], "ts": time.time(), "topic": topic, "n_lines": int(n_lines),
            "poem": res.poem, "rounds": res.rounds, "score": r.score, "length": r.length_score,

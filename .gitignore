@@ -12,3 +12,4 @@ runs/*/train.log
 .pytest_cache/
 run/
 .venv-win/
+dist/
