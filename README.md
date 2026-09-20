@@ -20,7 +20,8 @@ The scoring follows the length/tone/rhyme idea of the paper
 The poet is a small web page ([app/webui.py](app/webui.py)) that writes poems with the line-by-line sampler, shows the rule
 scores, and logs each poem and thumbs up/down (`data/generations.jsonl`, `data/feedback.jsonl`, git-ignored). It talks only to
 a model server on the same machine and nothing is sent to the internet (Gradio analytics are off). Pick your system:
-[Windows](#windows-lm-studio) runs the GGUF models in LM Studio, [Linux](#linux-vllm) runs the 16-bit models in vLLM, and
+[Windows](#windows-lm-studio) runs the GGUF models in LM Studio, [macOS](#macos-apple-silicon-lm-studio) runs the MLX
+models in LM Studio, [Linux](#linux-vllm) runs the 16-bit models in vLLM, and
 [other servers](#other-servers-llamacpp-and-any-openai-compatible-api) covers llama.cpp and anything OpenAI-compatible.
 
 ### Windows (LM Studio)
@@ -67,6 +68,42 @@ How LM Studio differs from the other servers, and what the launcher does about i
 
 On 40 prompts against LM Studio the 4B `Q8_0` scored 0.991 with 95% of poems fully valid; the 4B `Q4_K_M` with 4
 candidates per line scored 0.982 with 87.5% valid (the 16-bit model on vLLM: 0.994 and 98%, on 100 prompts).
+
+### macOS (Apple silicon, LM Studio)
+
+Run the poet on your own Mac with [LM Studio](https://lmstudio.ai), the same way as on Windows. No Python or command
+line needed; nothing you type leaves the machine. Macs with an Intel chip are not supported.
+
+1. Install LM Studio, open it once, then close it.
+2. Download `VietPoet-mac.zip` from the [latest release](https://github.com/peterbuitho/ThoLucBat/releases/latest)
+   and unzip it anywhere.
+3. Open **Start VietPoet.command**. The first time macOS may refuse it because it was downloaded from the internet:
+   right-click the file, choose **Open**, then **Open** again. If that does not work, run
+   `xattr -dr com.apple.quarantine <the unzipped folder>` in Terminal and open it again.
+
+The first start asks which model to use, **4B** (faster, recommended) or **9B**. The Mac's memory is shared between the
+processor and the graphics, so the launcher reads how much you have, picks the **8-bit** model (near-lossless) if it fits
+and the smaller **4-bit** one otherwise, and downloads it (2.5 to 10 GB, once) from Hugging Face. It uses the
+[MLX](https://github.com/ml-explore/mlx) version of the model, or the GGUF file (the one the Windows version uses) if
+no MLX version is published yet. It then loads the model into LM Studio and opens the poem page at
+`http://127.0.0.1:7860`. Later starts take seconds. To choose again, open **Change model or hardware.command**.
+Closing the Terminal window stops the page and unloads the model.
+
+What the launcher expects (memory figures are estimates from the file sizes, not measured on a Mac yet):
+
+| Model | Precision | Memory needed |
+|---|---|---|
+| 4B | 8-bit | about 6 GB |
+| 4B | 4-bit | about 3.5 GB |
+| 9B | 8-bit | about 11 GB |
+| 9B | 4-bit | about 6.5 GB |
+
+Notes:
+- **Not tested on a Mac yet.** The launcher was written and checked on Windows (syntax, memory choice, settings, model
+  lookup against a stand-in `lms`); how LM Studio's MLX engine handles 8 parallel requests, and how many seconds a poem
+  takes, are still to be measured. Please report what differs.
+- The launcher sets things up through LM Studio's `lms` command, so LM Studio must have been opened once.
+- The launcher is `packaging/mac/start.sh`; `packaging/mac/README.txt` is the readme inside the zip.
 
 ### Linux (vLLM)
 
