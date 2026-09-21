@@ -74,7 +74,7 @@ candidates per line scored 0.982 with 87.5% valid (the 16-bit model on vLLM: 0.9
 Run the poet on your own Mac with [LM Studio](https://lmstudio.ai), the same way as on Windows. No Python or command
 line needed; nothing you type leaves the machine. Macs with an Intel chip are not supported.
 
-1. Install LM Studio, open it once, then close it.
+1. Install LM Studio and open it once. If the launcher later says LM Studio's service did not start, leave the app open.
 2. Download `VietPoet-mac.zip` from the [latest release](https://github.com/peterbuitho/ThoLucBat/releases/latest)
    and unzip it anywhere.
 3. Open **Start VietPoet.command**. The first time macOS may refuse it because it was downloaded from the internet:
@@ -82,33 +82,41 @@ line needed; nothing you type leaves the machine. Macs with an Intel chip are no
    `xattr -dr com.apple.quarantine <the unzipped folder>` in Terminal and open it again.
 
 The first start asks which model to use, **4B** (faster, recommended) or **9B**. The Mac's memory is shared between the
-processor and the graphics, so the launcher reads how much you have, picks the **8-bit** model (near-lossless) if it fits
-and the smaller **4-bit** one otherwise, and downloads it (2.5 to 10 GB, once) from Hugging Face. It uses the
-[MLX](https://github.com/ml-explore/mlx) version of the model, or the GGUF file (the one the Windows version uses) if
-no MLX version is published yet. It then loads the model into LM Studio and opens the poem page at
-`http://127.0.0.1:7860`. Later starts take seconds. To choose again, open **Change model or hardware.command**.
-Closing the Terminal window stops the page and unloads the model.
+processor and the graphics, so the launcher reads how much you have, picks the **8-bit** file (near-lossless) if it fits
+and the smaller **4-bit** one otherwise, and downloads it (2.8 to 10 GB, once) from Hugging Face
+([4B](https://huggingface.co/peterbuitho/VietPoet-Qwen3.5-4B-GGUF), [9B](https://huggingface.co/peterbuitho/VietPoet-Qwen3.5-9B-GGUF)).
+It then loads the model into LM Studio and opens the poem page at `http://127.0.0.1:7860`. Later starts take seconds.
+To choose again, open **Change model or hardware.command**. Closing the Terminal window stops the page and unloads the
+model.
 
-What the launcher expects (memory figures are estimates from the file sizes, not measured on a Mac yet):
+What the launcher picks (extra memory measured as the growth in wired memory with LM Studio while a poem is written;
+seconds are for one 8-line poem with 8 candidates per line, on an M2 Pro with 16 GB):
 
-| Model | Precision | Memory needed |
-|---|---|---|
-| 4B | 8-bit | about 6 GB |
-| 4B | 4-bit | about 3.5 GB |
-| 9B | 8-bit | about 11 GB |
-| 9B | 4-bit | about 6.5 GB |
+| Model | File | Memory | Seconds per poem |
+|---|---|---|---|
+| 4B | `Q8_0` | 6.6 GB | 20 |
+| 4B | `Q4_K_M` | 4.9 GB | 25 |
+| 9B | `Q4_K_M` | 7.7 GB | 36 |
+| 9B | `Q8_0` | about 12 GB (estimate, not measured) | not measured |
+
+On 40 prompts the default (4B `Q8_0`, 8 candidates per line) scored 0.991 with 95% of poems fully valid, the same as on
+Windows.
 
 Notes:
-- **Not tested on a Mac yet.** The launcher was written and checked on Windows (syntax, memory choice, settings, model
-  lookup against a stand-in `lms`); how LM Studio's MLX engine handles 8 parallel requests, and how many seconds a poem
-  takes, are still to be measured. Please report what differs.
-- The launcher sets things up through LM Studio's `lms` command, so LM Studio must have been opened once.
-- The launcher is `packaging/mac/start.sh`; `packaging/mac/README.txt` is the readme inside the zip.
+- Tested on one machine (M2 Pro, 16 GB, LM Studio 0.4.25). The launcher was run there end to end (download, load, page),
+  but not with LM Studio closed at the start, not on a Mac with 8 GB, and not with the 9B `Q8_0`.
+- **GGUF, not MLX, is the default** because it is faster in LM Studio: 4B at 8-bit took 20 s per poem as GGUF and 99 s
+  as MLX (MLX 4-bit: 105 s), and the MLX engine needed about 4 GB more memory. Set `VIETPOET_FORMAT=mlx` to use the MLX
+  models ([8-bit](https://huggingface.co/peterbuitho/VietPoet-Qwen3.5-4B-MLX-8bit), [4-bit](https://huggingface.co/peterbuitho/VietPoet-Qwen3.5-4B-MLX-4bit),
+  4B only). Like the other LM Studio engines, LM Studio's MLX engine accepts one completion per request and returns no
+  log-probabilities.
+- The launcher is `packaging/mac/start.sh`; `packaging/mac/README.txt` is the readme inside the zip. Build the zip yourself
+  with `python scripts/build_package.py --target mac`.
 
 ### Linux (vLLM)
 
-Needs a GPU and the merged 16-bit models made by the [Reproduce](#reproduce) steps (they are not published; only the GGUF
-exports are). vLLM listens on 127.0.0.1 only, and telemetry is off (`VLLM_NO_USAGE_STATS`, `DO_NOT_TRACK`, `HF_HUB_OFFLINE`
+Needs a GPU and the merged 16-bit models: download [4B](https://huggingface.co/peterbuitho/VietPoet-Qwen3.5-4B) or
+[9B](https://huggingface.co/peterbuitho/VietPoet-Qwen3.5-9B) with `hf download`, or make them with the [Reproduce](#reproduce) steps. vLLM listens on 127.0.0.1 only, and telemetry is off (`VLLM_NO_USAGE_STATS`, `DO_NOT_TRACK`, `HF_HUB_OFFLINE`
 for local models). Start and stop everything with one script (the model server plus the page):
 
 ```bash
@@ -153,6 +161,19 @@ system: `VIETPOET_BASE_URL=http://localhost:1234/v1 VIETPOET_MODEL=<model name> 
 vLLM, so the sampler adapts: it reads log-probabilities in either format, learns a server's cap on samples per request
 (llama.cpp allows at most as many as it has parallel slots; LM Studio allows one) and splits the request, and falls back to
 picking without log-probabilities if a server has none.
+
+MLX (Apple's format) is published for the 4B model, [8-bit](https://huggingface.co/peterbuitho/VietPoet-Qwen3.5-4B-MLX-8bit)
+and [4-bit](https://huggingface.co/peterbuitho/VietPoet-Qwen3.5-4B-MLX-4bit), converted with `mlx_lm.convert`. On 40 prompts
+with `mlx_lm.server` they scored 0.992 (95% valid) and 0.995 (100% valid). The sampler works with `mlx_lm.server` (0.31.3)
+only with these settings, because that server differs from the others:
+`mlx_lm.server --model <path or repo> --prompt-cache-size 0`, then `VIETPOET_MODEL=default_model`.
+- With the prompt cache on, its generation thread crashes (`IndexError`) as soon as a prompt exactly matches a cached one,
+  which the line-by-line sampler causes on every line; every later request then hangs.
+- Any model name other than `default_model` (or the local path) is treated as a repository to load, and the server
+  contacts huggingface.co to fetch it.
+- `n` is ignored (one completion per request), `logprobs` must be `true` (an integer makes it drop the connection), and
+  the end token `<|im_end|>` comes back as text. The sampler copes with all three.
+- 16 simultaneous connections get reset; 8 work. It takes about 75 to 85 s per poem (M2 Pro, 16 candidates per line).
 
 Speed for one 8-line poem (16 candidates per line unless noted): vLLM on the RTX 4090 about 2 s; LM Studio on the 4090
 about 11 to 14 s with 16 parallel predictions; `llama-server` on the 4090 about 24 s with 16 parallel slots (37 s with 4);

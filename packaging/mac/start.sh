@@ -1,5 +1,5 @@
 #!/bin/bash
-# VietPoet launcher for Apple silicon Macs: choose a model, download it, start LM Studio's server, load the model,
+# VietPoet launcher for Apple silicon Macs: choose a model (GGUF by default, MLX on request), download it, start LM Studio's server, load the model,
 # open the poem page. Written for the stock macOS bash 3.2 (no bash 4 features).
 #   start.sh [--size 4B|9B] [--format mlx|gguf] [--reconfigure] [--no-browser] [--setup-only]
 # Environment: VIETPOET_SIZE, VIETPOET_BITS (8|4), VIETPOET_FORMAT (mlx|gguf), VIETPOET_CANDIDATES, VIETPOET_PORT,
@@ -25,11 +25,16 @@ warn() { echo "${C_YELLOW}$1${C_OFF}"; }
 die() { echo; echo "${C_RED}Something went wrong: $1${C_OFF}"; exit 1; }
 gb() { awk -v m="$1" 'BEGIN { printf "%.1f GB", m / 1024 }'; }
 
-# Unified memory (MiB) the loaded model needs: the weights (MLX or GGUF file) plus about 1 GB for the cache and overhead.
-# These are estimates from the file sizes, not measurements (the Windows launcher's numbers were measured).
+# Unified memory (MiB) the loaded model needs on top of what is already in use, measured with LM Studio (8 requests at a
+# time, 8192 context) as the growth in wired memory while a poem is being written. The 4B numbers are measured on an
+# M2 Pro with 16 GB (4B and 9B GGUF Q4_K_M and 4B Q8_0; the rest are estimates scaled from file sizes, marked below).
+# LM Studio's GGUF engine (llama.cpp) is about five times faster than its MLX engine here and needs less memory, so GGUF
+# is the default and MLX only runs when asked for (VIETPOET_FORMAT=mlx).
 need_mib() {   # size bits
-    case "$1$2" in
-        4B8) echo 5700;; 4B4) echo 3600;; 9B8) echo 10900;; 9B4) echo 6700;;
+    local fmt="${VIETPOET_FORMAT:-$OPT_FORMAT}"
+    case "${fmt:-gguf}$1$2" in
+        gguf4B8) echo 7000;; gguf4B4) echo 5200;; gguf9B8) echo 12000;; gguf9B4) echo 8000;;   # 9B Q8_0: estimate
+        mlx4B8) echo 11500;; mlx4B4) echo 9200;; mlx9B8) echo 22500;; mlx9B4) echo 16000;;      # 9B: estimate
     esac
 }
 
@@ -68,8 +73,8 @@ choose_setup() {   # sets SIZE and BITS
     size=$(echo "${VIETPOET_SIZE:-$OPT_SIZE}" | tr 'a-z' 'A-Z')
     if [ "$size" != 4B ] && [ "$size" != 9B ]; then
         n=$(ask "Which model do you want?" 1 \
-            "4B - faster, smaller download (2.5 to 4.6 GB). Recommended." \
-            "9B - larger (5.6 to 9.8 GB), needs more memory and is a little slower")
+            "4B - faster, smaller download (2.8 to 4.6 GB). Recommended." \
+            "9B - larger (5.8 to 9.8 GB), needs more memory and is a little slower")
         if [ "$n" = 2 ]; then size=9B; else size=4B; fi
     fi
 
@@ -148,6 +153,12 @@ models_dir() {     # LM Studio's models folder
     echo "${d:-$HOME/.lmstudio/models}"
 }
 
+check_service() {  # `lms` starts LM Studio's background service on demand; when it cannot, every later step fails
+    if ! "$LMS" ls --json >/dev/null 2>&1; then
+        die "LM Studio's background service did not start. Open the LM Studio app once (leave it open), then run this again."
+    fi
+}
+
 locate() {         # name -> LM Studio's key for the model whose path contains it, or nothing
     "$LMS" ls --json 2>/dev/null | "$PY" -c '
 import sys, json
@@ -200,9 +211,9 @@ PYEOF
     rmdir "$ROOT/downloads" 2>/dev/null
 }
 
-resolve_model() {  # sets KEY, NAME, FORMAT_USED; tries MLX first, then the GGUF file
+resolve_model() {  # sets KEY, NAME, FORMAT_USED; tries the GGUF file first (the faster one in LM Studio), then MLX
     local formats fmt i
-    if [ -n "${VIETPOET_FORMAT:-$OPT_FORMAT}" ]; then formats="${VIETPOET_FORMAT:-$OPT_FORMAT}"; else formats="mlx gguf"; fi
+    if [ -n "${VIETPOET_FORMAT:-$OPT_FORMAT}" ]; then formats="${VIETPOET_FORMAT:-$OPT_FORMAT}"; else formats="gguf mlx"; fi
     KEY=""
     for fmt in $formats; do
         set_names "$fmt"
@@ -252,6 +263,7 @@ main() {
     find_lms
     [ -n "$LMS" ] || die "LM Studio was not found. Install it from https://lmstudio.ai, open it once, close it, then run this again."
     note "found $LMS"
+    check_service
 
     # ---- 2. Python (also used below to download the model) ---------------------------------------
     setup_python
