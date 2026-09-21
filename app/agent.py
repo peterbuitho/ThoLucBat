@@ -14,6 +14,7 @@ from .prompts import chat, make_repair_request, make_request, render_prompt
 from .validator import PoemReport, evaluate_poem
 
 THINK_RE = re.compile(r"<think>.*?</think>", re.S)
+SPECIAL_TOKEN_RE = re.compile(r"<\|[^<>\s]*\|>|<[^<>\s|]*\|>|<end_of_turn>")   # <|im_end|>, <turn|>, ...: mlx_lm.server returns them as text
 
 
 @dataclass
@@ -120,7 +121,7 @@ class PoetAgent:
         out = []
         for c in choices[:n]:
             lp = self._mean_logprob(c)
-            out.append(((c.text or "").strip(), lp if lp is not None else 0.0))
+            out.append((SPECIAL_TOKEN_RE.split(c.text or "", 1)[0].strip(), lp if lp is not None else 0.0))
         return out
 
     @staticmethod

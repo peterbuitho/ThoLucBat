@@ -267,3 +267,10 @@ def test_connection_errors_switch_logprobs_off_and_then_propagate():
     with pytest.raises(APIConnectionError):
         a._complete_lines("p", 1, 0.9)
     assert a._use_logprobs is False
+
+
+def test_end_of_turn_token_returned_as_text_is_cut_off_the_line():
+    a = _server(lambda **kw: NS(choices=[NS(text="Người ơi có nhớ có chờ người không<|im_end|>\n<|im_end|>", logprobs=None),
+                                         NS(text="Trăng lên đầu ngõ<turn|>", logprobs=None),
+                                         NS(text="Gió đưa cành trúc la đà", logprobs=None)]))
+    assert [t for t, _ in a._complete_lines("p", 3, 0.9)] == ["Người ơi có nhớ có chờ người không", "Trăng lên đầu ngõ", "Gió đưa cành trúc la đà"]
